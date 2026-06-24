@@ -1,12 +1,10 @@
-import { useState } from 'react';
-import './App.css';
+import { useState, useEffect, useRef } from "react";
+import Exim from "./Exim";
 
-function App() {
-  return (
-    <>
-      <div>Hello</div>
-    </>
-  );
+export default function App() {
+    return (
+<>
+<Exim/>
+</>
+    );
 }
-
-export default App;
