@@ -1,719 +1,824 @@
 import { useState, useCallback } from "react";
 
-// Default exchange rates (approximate mid-market vs INR)
-const DEFAULT_RATES = { INR: 1, USD: 83.5, EUR: 91.2, GBP: 106.8, JPY: 0.56, AED: 22.73, CNY: 11.5 };
+const EXAMPLE_RATES = { USD: "83.50", EUR: "91.20", GBP: "106.80", JPY: "0.56", AED: "22.73", CNY: "11.50" };
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "JPY", "AED", "CNY"];
 
+const fmt = (n) =>
+  isNaN(n) || n === undefined ? "—"
+    : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const toINR = (val, cur, rate) => num(val) * (cur === "INR" ? 1 : num(rate));
+
+// ─── DESIGN TOKENS ─────────────────────────────────────────────────────────
+// navy:#1E3A5F  lime:#C8E84A  dark:#0D0C20  green:#2ECB72
+// yellow:#F7DF1E  midnight:#001920  light:#F5F6F6  lavender:#C8C3FC
+
 const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
   :root {
-    --navy:    #0f1b2d; --navy-2:  #162236; --navy-3:  #1e3150;
-    --slate:   #2a3f5f; --border:  #2e4a6e;
-    --amber:   #f59e0b; --amber-l: #fbbf24; --amber-d: #d97706;
-    --teal:    #0d9488; --teal-l:  #14b8a6;
-    --red:     #ef4444; --red-l:   #fca5a5;
-    --text-1:  #e2eaf5; --text-2:  #94a8c0; --text-3:  #5c7a99;
-    --green:   #10b981; --green-l: #6ee7b7; --purple:  #8b5cf6;
+    --navy:      #1E3A5F;
+    --lime:      #C8E84A;
+    --dark:      #0D0C20;
+    --green:     #2ECB72;
+    --yellow:    #F7DF1E;
+    --midnight:  #001920;
+    --light:     #F5F6F6;
+    --lavender:  #C8C3FC;
+    --white:     #FFFFFF;
+    --black:     #000000;
+
+    /* Surface layers */
+    --bg:        var(--dark);
+    --surface:   #111228;
+    --surface-2: #192040;
+    --surface-3: #1a2d50;
+
+    /* Borders */
+    --border:    rgba(200,232,74,.12);
+    --border-2:  rgba(200,232,74,.22);
+
+    /* Text */
+    --text-1: #F5F6F6;
+    --text-2: #9eaec0;
+    --text-3: #5a6e82;
+
+    /* Accents */
+    --accent:    var(--lime);
+    --accent-d:  #a8c43a;
+    --accent-dim:rgba(200,232,74,.08);
+    --green-dim: rgba(46,203,114,.08);
+    --lav-dim:   rgba(200,195,252,.08);
   }
-  body { background: var(--navy); color: var(--text-1); font-family: 'Inter', sans-serif; min-height: 100vh; }
-  .app { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
 
-  /* Header */
-  .header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
-  .header-icon { width: 48px; height: 48px; background: var(--amber); border-radius: 12px;
-    display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
-  .header h1 { font-size: 22px; font-weight: 700; color: var(--text-1); letter-spacing: -0.3px; }
-  .header p  { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+  body { background: var(--bg); color: var(--text-1); font-family: 'Inter', sans-serif; min-height: 100vh; }
+  .app { max-width: 1100px; margin: 0 auto; padding: 28px 16px 72px; }
 
-  /* Tabs */
-  .tabs { display: flex; gap: 4px; background: var(--navy-2); border-radius: 12px; padding: 4px;
-    border: 1px solid var(--border); margin-bottom: 24px; width: fit-content; }
-  .tab { padding: 8px 20px; border-radius: 9px; font-size: 13px; font-weight: 500;
-    cursor: pointer; border: none; transition: all .2s; color: var(--text-2); background: transparent; }
-  .tab.active { background: var(--amber); color: var(--navy); font-weight: 600; }
-  .tab:hover:not(.active) { color: var(--text-1); background: var(--slate); }
-
-  /* Card */
-  .card { background: var(--navy-2); border: 1px solid var(--border); border-radius: 16px;
-    padding: 24px; margin-bottom: 20px; }
-  .card-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px;
-    color: var(--amber); margin-bottom: 18px; }
-  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-
-  /* Grid */
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media(max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
-
-  /* Field */
-  .field { display: flex; flex-direction: column; gap: 6px; }
-  .field label { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.8px; }
-
-  /* Remove number input arrows */
   input[type=number] { -moz-appearance: textfield; }
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-  /* Currency+Value combined input */
-  .cx-wrap { display: flex; border: 1px solid var(--border); border-radius: 8px;
-    overflow: hidden; background: var(--navy-3); transition: border-color .2s; }
-  .cx-wrap:focus-within { border-color: var(--amber); }
+  /* ── Header ── */
+  .header { display: flex; align-items: center; gap: 16px; margin-bottom: 36px; }
+  .header-icon {
+    width: 52px; height: 52px; flex-shrink: 0; border-radius: 14px;
+    background: linear-gradient(135deg, var(--lime) 0%, var(--yellow) 100%);
+    display: flex; align-items: center; justify-content: center; font-size: 24px;
+    box-shadow: 0 0 24px rgba(200,232,74,.35);
+  }
+  .header h1 { font-size: 22px; font-weight: 800; letter-spacing: -.4px; color: var(--text-1); }
+  .header p  { font-size: 13px; color: var(--text-3); margin-top: 3px; }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 12px;
+    padding: 4px; border: 1px solid var(--border); margin-bottom: 24px; width: fit-content; }
+  .tab { padding: 8px 22px; border-radius: 9px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none; transition: all .18s; color: var(--text-3); background: transparent;
+    font-family: 'Inter', sans-serif; }
+  .tab.active { background: var(--lime); color: var(--dark); font-weight: 700; }
+  .tab:hover:not(.active) { color: var(--text-1); background: var(--surface-2); }
+
+  /* ── Card ── */
+  .card { background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px; margin-bottom: 20px; }
+  .card-title { font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 1.5px; color: var(--lime); margin-bottom: 20px; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media(max-width: 660px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* ── Field ── */
+  .field { display: flex; flex-direction: column; gap: 7px; }
+  .field label { font-size: 10px; font-weight: 700; color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 1px; }
+  .field-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
+  .field-head-label { font-size: 10px; font-weight: 700; color: var(--text-3);
+    text-transform: uppercase; letter-spacing: 1px; }
+
+  /* ── Combined currency + value ── */
+  .cx-wrap { display: flex; border: 1px solid var(--border); border-radius: 9px;
+    overflow: hidden; background: var(--surface-2); transition: border-color .18s; }
+  .cx-wrap:focus-within { border-color: var(--lime); box-shadow: 0 0 0 2px rgba(200,232,74,.12); }
   .cx-select { border: none; border-right: 1px solid var(--border); border-radius: 0;
-    background: rgba(46,74,110,.4); color: var(--amber-l); font-size: 13px; font-weight: 600;
-    padding: 9px 10px; width: 72px; flex-shrink: 0; cursor: pointer; outline: none;
-    appearance: none; -webkit-appearance: none; text-align: center; }
-  .cx-select option { background: var(--navy-3); color: var(--text-1); }
+    background: rgba(30,58,95,.6); color: var(--lime); font-size: 11px; font-weight: 800;
+    padding: 10px 6px; width: 66px; flex-shrink: 0; cursor: pointer; outline: none;
+    appearance: none; -webkit-appearance: none; text-align: center; font-family: 'Inter', sans-serif; }
+  .cx-select option { background: var(--surface-2); color: var(--text-1); font-weight: 400; }
   .cx-input { border: none; background: transparent; color: var(--text-1); font-size: 14px;
-    padding: 9px 12px; width: 100%; outline: none; font-family: 'Inter', sans-serif; }
+    padding: 10px 12px; width: 100%; outline: none; font-family: 'Inter', sans-serif; }
   .cx-input::placeholder { color: var(--text-3); }
-  .cx-converted { font-size: 11px; color: var(--text-3); margin-top: 5px; padding-left: 2px; }
 
-  /* Plain input */
-  .input { background: var(--navy-3); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text-1); font-size: 14px; padding: 9px 12px; width: 100%;
-    font-family: 'Inter', sans-serif; outline: none; transition: border-color .2s; }
-  .input:focus { border-color: var(--amber); }
-  .input.readonly { background: rgba(13,148,136,.07); border-color: rgba(13,148,136,.25);
-    color: var(--teal-l); cursor: default; font-weight: 600; }
+  /* ── Plain input ── */
+  .input { background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+    color: var(--text-1); font-size: 14px; padding: 10px 12px; width: 100%;
+    font-family: 'Inter', sans-serif; outline: none; transition: all .18s; }
+  .input:focus { border-color: var(--lime); box-shadow: 0 0 0 2px rgba(200,232,74,.12); }
+  .input.readonly { background: rgba(46,203,114,.06); border-color: rgba(46,203,114,.2);
+    color: var(--green); cursor: default; font-weight: 600; }
 
-  /* Pct row */
-  .pct-row { display: flex; gap: 8px; align-items: center; }
-  .pct-row .cx-wrap { flex: 1; }
-  .pct-box { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .pct-box span { font-size: 11px; color: var(--text-3); white-space: nowrap; }
-  .pct-input { width: 72px; background: var(--navy-3); border: 1px solid var(--border);
-    border-radius: 8px; color: var(--text-1); font-size: 14px; padding: 9px 10px;
-    outline: none; transition: border-color .2s; text-align: center; }
-  .pct-input:focus { border-color: var(--amber); }
+  /* ── Hint ── */
+  .hint { font-size: 11px; color: var(--text-3); margin-top: 5px; padding-left: 2px; }
 
-  /* Warning */
-  .warning { background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.3);
-    border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--amber-l); margin-top: 8px;
-    display: flex; align-items: flex-start; gap: 8px; }
+  /* ── Value / % Toggle ── */
+  .vp-toggle { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
+  .vp-btn { padding: 5px 11px; font-size: 11px; font-weight: 700; cursor: pointer;
+    border: none; transition: all .15s; color: var(--text-3); background: transparent;
+    font-family: 'Inter', sans-serif; letter-spacing: .3px; }
+  .vp-btn.on { background: var(--lime); color: var(--dark); }
+  .vp-btn:not(.on):hover { color: var(--text-1); background: var(--surface-2); }
 
-  /* Tape */
-  .tape { height: 3px; background: linear-gradient(90deg, var(--amber-d), var(--amber), var(--amber-l), var(--amber));
-    border-radius: 2px; margin: 8px 0 20px; box-shadow: 0 0 12px rgba(245,158,11,.4); }
+  /* ── Per-field exchange rate row ── */
+  .rate-row { display: flex; align-items: center; gap: 8px; margin-top: 7px;
+    background: rgba(30,58,95,.5); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+  .rate-row-inherited { background: rgba(200,232,74,.05); border-color: rgba(200,232,74,.15); }
+  .rate-row-label { font-size: 11px; color: var(--text-3); white-space: nowrap; flex-shrink: 0; }
+  .rate-input { flex: 1; background: transparent; border: none; color: var(--lime);
+    font-size: 13px; font-weight: 700; outline: none; font-family: 'Inter', sans-serif; min-width: 0; }
+  .rate-input::placeholder { color: var(--text-3); font-weight: 400; font-style: italic; }
+  .rate-converted { font-size: 11px; color: var(--green); white-space: nowrap; flex-shrink: 0; font-weight: 600; }
+  .rate-tag-inherited { font-size: 9px; font-weight: 800; color: var(--dark);
+    background: var(--lime); border-radius: 10px; padding: 2px 8px; white-space: nowrap;
+    flex-shrink: 0; letter-spacing: .5px; text-transform: uppercase; }
 
-  /* Result rows */
+  /* ── % suffix input ── */
+  .pct-only-wrap { display: flex; border: 1px solid var(--border); border-radius: 9px;
+    overflow: hidden; background: var(--surface-2); transition: all .18s; }
+  .pct-only-wrap:focus-within { border-color: var(--lime); box-shadow: 0 0 0 2px rgba(200,232,74,.12); }
+  .pct-suffix { display: flex; align-items: center; padding: 10px 12px;
+    background: rgba(30,58,95,.6); color: var(--lime); font-size: 13px;
+    font-weight: 700; flex-shrink: 0; border-left: 1px solid var(--border); }
+
+  /* ── Warning ── */
+  .warning { background: rgba(247,223,30,.07); border: 1px solid rgba(247,223,30,.25);
+    border-radius: 9px; padding: 10px 14px; font-size: 12px; color: var(--yellow);
+    margin-top: 8px; display: flex; gap: 8px; align-items: flex-start; }
+
+  /* ── Info box ── */
+  .info-box { background: var(--lav-dim); border: 1px solid rgba(200,195,252,.2);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 20px; }
+  .info-box-title { font-size: 10px; font-weight: 800; color: var(--lavender);
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .info-box p { font-size: 12px; color: var(--text-2); line-height: 1.75; }
+  .info-box strong { color: var(--text-1); }
+
+  /* ── Tape accent ── */
+  .tape { height: 2px; background: linear-gradient(90deg, transparent, var(--lime), var(--yellow), var(--lime), transparent);
+    border-radius: 2px; margin: 6px 0 22px; box-shadow: 0 0 16px rgba(200,232,74,.5); }
+
+  /* ── Result rows ── */
   .result-row { display: flex; justify-content: space-between; align-items: center;
-    padding: 9px 0; border-bottom: 1px solid rgba(46,74,110,.5); }
+    padding: 9px 0; border-bottom: 1px solid rgba(200,232,74,.06); }
   .result-row:last-child { border-bottom: none; }
   .result-label { font-size: 13px; color: var(--text-2); }
   .result-value { font-size: 14px; font-weight: 600; color: var(--text-1); }
-  .result-value.gl  { color: var(--green-l); }
-  .result-value.teal{ color: var(--teal-l); }
-  .result-value.amb { color: var(--amber-l); }
-  .result-value.pur { color: var(--purple); }
-  .result-value.dim { color: var(--text-2); font-weight: 500; }
+  .rv-lime { color: var(--lime); }
+  .rv-green{ color: var(--green); }
+  .rv-lav  { color: var(--lavender); }
+  .rv-yel  { color: var(--yellow); }
+  .rv-dim  { color: var(--text-2); font-weight: 500; }
+  .rv-big  { font-size: 15px; }
 
-  /* Sub-result blocks */
-  .sub-result { background: var(--navy-3); border-radius: 10px; padding: 14px 16px; }
+  /* ── Sub result block ── */
+  .sub-result { background: var(--surface-2); border-radius: 10px; padding: 14px 16px; border: 1px solid var(--border); }
   .sub-result .result-row { padding: 7px 0; }
-  .block-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
-    color: var(--text-3); margin: 16px 0 6px; }
+  .block-label { font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-3); margin: 18px 0 8px; }
   .block-label:first-child { margin-top: 0; }
 
-  /* Summary block */
-  .summary-block { background: rgba(110,231,183,.06); border: 1px solid rgba(110,231,183,.15);
-    border-radius: 10px; padding: 14px 16px; margin-top: 12px; }
+  /* ── Summary block ── */
+  .summary-block { background: rgba(46,203,114,.06); border: 1px solid rgba(46,203,114,.15);
+    border-radius: 10px; padding: 14px 16px; margin-top: 14px; }
   .summary-block .result-row { padding: 7px 0; }
 
-  /* Total card */
-  .total-card { background: linear-gradient(135deg, var(--amber-d) 0%, var(--amber) 100%);
-    border-radius: 14px; padding: 20px 24px; display: flex; justify-content: space-between;
-    align-items: center; margin-top: 20px; }
-  .total-label { font-size: 13px; font-weight: 600; color: rgba(15,27,45,.8); }
-  .total-value { font-size: 26px; font-weight: 700; color: var(--navy); }
-  .total-sub   { font-size: 11px; color: rgba(15,27,45,.6); margin-top: 2px; }
+  /* ── Sep row ── */
+  .sep-row { border-top: 1px solid rgba(200,232,74,.15) !important; padding-top: 10px !important; margin-top: 4px; }
 
-  /* Buttons */
+  /* ── Total cards ── */
+  .total-card {
+    background: linear-gradient(135deg, #1a2d10 0%, #2a4a1a 100%);
+    border: 1px solid rgba(200,232,74,.3);
+    border-radius: 14px; padding: 22px 24px;
+    display: flex; justify-content: space-between; align-items: center; margin-top: 20px;
+    box-shadow: 0 0 32px rgba(200,232,74,.1);
+  }
+  .total-card-green {
+    background: linear-gradient(135deg, #0a2010 0%, #163320 100%);
+    border: 1px solid rgba(46,203,114,.3);
+    border-radius: 14px; padding: 22px 24px;
+    display: flex; justify-content: space-between; align-items: center; margin-top: 20px;
+    box-shadow: 0 0 32px rgba(46,203,114,.1);
+  }
+  .total-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+  .total-value { font-size: 28px; font-weight: 800; }
+  .total-sub   { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+  .total-card .total-value { color: var(--lime); }
+  .total-card-green .total-value { color: var(--green); }
+
+  /* ── Buttons ── */
   .btn-reset { background: transparent; border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text-2); font-size: 13px; padding: 8px 20px; cursor: pointer; transition: all .2s; }
-  .btn-reset:hover { border-color: var(--red-l); color: var(--red-l); }
+    color: var(--text-3); font-size: 12px; padding: 7px 18px; cursor: pointer; transition: all .18s;
+    font-family: 'Inter', sans-serif; font-weight: 600; }
+  .btn-reset:hover { border-color: rgba(247,223,30,.4); color: var(--yellow); }
 
-  /* Auto badge */
-  .auto-badge { display: inline-flex; align-items: center;
-    background: rgba(13,148,136,.12); border: 1px solid rgba(13,148,136,.28);
-    border-radius: 20px; font-size: 9px; color: var(--teal-l);
-    padding: 2px 7px; font-weight: 700; margin-left: 6px; letter-spacing: 0.5px; }
+  /* ── Auto badge ── */
+  .auto-badge { display: inline-flex; align-items: center; background: rgba(46,203,114,.1);
+    border: 1px solid rgba(46,203,114,.25); border-radius: 20px; font-size: 9px;
+    color: var(--green); padding: 2px 7px; font-weight: 800; letter-spacing: .6px;
+    text-transform: uppercase; }
 
-  /* Auto group */
-  .auto-group { background: rgba(13,148,136,.05); border: 1px solid rgba(13,148,136,.18);
+  /* ── Auto group ── */
+  .auto-group { background: var(--green-dim); border: 1px solid rgba(46,203,114,.15);
     border-radius: 12px; padding: 18px; margin-bottom: 16px; }
-  .auto-group-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px;
-    color: var(--teal-l); margin-bottom: 14px; }
+  .auto-group-title { font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--green); margin-bottom: 14px; }
 
-  /* Divider */
-  .divider { height: 1px; background: var(--border); margin: 18px 0; }
+  /* ── Divider ── */
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
 
-  /* LC additional charges */
-  .lc-add-btn { background: transparent; border: 1px dashed var(--border); border-radius: 8px;
-    color: var(--text-2); font-size: 13px; padding: 9px 16px; cursor: pointer; width: 100%;
-    margin-top: 10px; transition: all .2s; }
-  .lc-add-btn:hover { border-color: var(--amber); color: var(--amber); }
-  .lc-item { display: grid; grid-template-columns: 1fr 160px auto; gap: 10px;
-    align-items: center; margin-bottom: 10px; }
-  .lc-del { background: transparent; border: none; color: var(--text-3); cursor: pointer;
-    font-size: 16px; padding: 4px 8px; border-radius: 6px; transition: color .2s; }
-  .lc-del:hover { color: var(--red); }
+  /* ── LC dynamic rows ── */
+  .lc-add-btn { background: transparent; border: 1px dashed rgba(200,232,74,.25); border-radius: 9px;
+    color: var(--text-3); font-size: 13px; padding: 10px 16px; cursor: pointer; width: 100%;
+    margin-top: 10px; transition: all .18s; font-family: 'Inter', sans-serif; font-weight: 500; }
+  .lc-add-btn:hover { border-color: var(--lime); color: var(--lime); }
+  .lc-item { display: grid; grid-template-columns: 1fr 170px auto;
+    gap: 10px; align-items: center; margin-bottom: 10px; }
+  .lc-del { background: transparent; border: 1px solid transparent; color: var(--text-3);
+    cursor: pointer; font-size: 16px; padding: 6px 8px; border-radius: 7px; transition: all .18s; }
+  .lc-del:hover { color: var(--yellow); border-color: rgba(247,223,30,.3); background: rgba(247,223,30,.06); }
 
-  /* Stat boxes */
+  /* ── Stat boxes ── */
   .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
-  .stat-box { flex: 1; min-width: 130px; background: var(--navy-3); border-radius: 10px; padding: 12px 16px; }
-  .stat-label { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; }
-  .stat-value { font-size: 18px; font-weight: 700; }
+  .stat-box { flex: 1; min-width: 120px; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px; }
+  .stat-label { font-size: 10px; color: var(--text-3); text-transform: uppercase;
+    letter-spacing: .8px; margin-bottom: 5px; font-weight: 600; }
+  .stat-value { font-size: 18px; font-weight: 800; }
+
+  /* ── Section group label ── */
+  .group-label { font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--lime); margin-bottom: 14px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 `;
 
-const fmt = (n) =>
-  isNaN(n) || n === undefined
-    ? "—"
-    : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// ─── Small components ───────────────────────────────────────────────────────
+const VPToggle = ({ mode, onChange }) => (
+  <div className="vp-toggle">
+    <button className={`vp-btn ${mode==="value"?"on":""}`} onClick={() => onChange("value")}>Value</button>
+    <button className={`vp-btn ${mode==="pct"?"on":""}`}   onClick={() => onChange("pct")}>%</button>
+  </div>
+);
 
-const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const CxField = ({ currency, value, onCurrencyChange, onValueChange, placeholder="0.00" }) => (
+  <div className="cx-wrap">
+    <select className="cx-select" value={currency} onChange={onCurrencyChange}>
+      {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+    </select>
+    <input className="cx-input" type="number" placeholder={placeholder} value={value} onChange={onValueChange} />
+  </div>
+);
 
-// Currency+Value combined field — auto-fills exchange rate hint
-const CxField = ({ currency, value, onCurrencyChange, onValueChange, exRate, placeholder = "0.00" }) => {
-  const converted = currency !== "INR" && num(value) > 0
-    ? num(value) * (num(exRate) || DEFAULT_RATES[currency] || 1)
-    : null;
-  return (
-    <div>
-      <div className="cx-wrap">
-        <select className="cx-select" value={currency} onChange={onCurrencyChange}>
-          {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <input className="cx-input" type="number" placeholder={placeholder}
-          value={value} onChange={onValueChange} />
+const PctField = ({ value, onChange, placeholder="0.00" }) => (
+  <div className="pct-only-wrap">
+    <input className="cx-input" type="number" placeholder={placeholder} value={value} onChange={onChange} />
+    <div className="pct-suffix">%</div>
+  </div>
+);
+
+const PerFieldRate = ({ currency, invoiceCur, invoiceRateStr, rate, onRateChange, fieldValue, isSource=false }) => {
+  if (currency === "INR") return null;
+  const hasValue = num(fieldValue) > 0;
+  const eg = EXAMPLE_RATES[currency] ?? "—";
+
+  if (isSource) {
+    const hasRate = num(rate) > 0;
+    const inrVal  = hasValue && hasRate ? num(fieldValue) * num(rate) : 0;
+    return (
+      <div className="rate-row">
+        <span className="rate-row-label">1 {currency} =</span>
+        <input className="rate-input" type="number" placeholder={`e.g. ${eg}`} value={rate} onChange={onRateChange} />
+        <span className="rate-row-label">INR</span>
+        {inrVal > 0 && <span className="rate-converted">= ₹{fmt(inrVal)}</span>}
       </div>
-      {converted !== null && (
-        <div className="cx-converted">= ₹{fmt(converted)}</div>
-      )}
+    );
+  }
+
+  if (currency === invoiceCur) {
+    const inheritedRate = num(invoiceRateStr);
+    const inrVal = hasValue && inheritedRate > 0 ? num(fieldValue) * inheritedRate : 0;
+    return (
+      <div className="rate-row rate-row-inherited">
+        <span className="rate-row-label">1 {currency} =</span>
+        <span style={{ flex:1, fontSize:13, fontWeight:700, color:"var(--lime)" }}>
+          {inheritedRate > 0 ? fmt(inheritedRate)
+            : <em style={{ color:"var(--text-3)", fontWeight:400, fontSize:12 }}>enter invoice rate above</em>}
+        </span>
+        <span className="rate-row-label">INR</span>
+        <span className="rate-tag-inherited">From invoice</span>
+        {inrVal > 0 && <span className="rate-converted">= ₹{fmt(inrVal)}</span>}
+      </div>
+    );
+  }
+
+  const hasRate = num(rate) > 0;
+  const inrVal  = hasValue && hasRate ? num(fieldValue) * num(rate) : 0;
+  return (
+    <div className="rate-row">
+      <span className="rate-row-label">1 {currency} =</span>
+      <input className="rate-input" type="number" placeholder={`e.g. ${eg}`} value={rate} onChange={onRateChange} />
+      <span className="rate-row-label">INR</span>
+      {inrVal > 0 && <span className="rate-converted">= ₹{fmt(inrVal)}</span>}
     </div>
   );
 };
 
 const ReadonlyField = ({ label, value, color }) => (
   <div className="field">
-    <label>{label}<span className="auto-badge">AUTO</span></label>
+    <label style={{ display:"flex", alignItems:"center", gap:6 }}>
+      {label}<span className="auto-badge">AUTO</span>
+    </label>
     <input className="input readonly" readOnly
       value={value > 0 ? `₹ ${fmt(value)}` : "—"}
       style={color ? { color } : {}} />
   </div>
 );
 
+const RR = ({ label, value, cls="", bold=false, sep=false }) => (
+  <div className={`result-row ${sep?"sep-row":""}`}>
+    <span className="result-label" style={bold?{fontWeight:600,color:"var(--text-1)"}:{}}>{label}</span>
+    <span className={`result-value ${cls}`}>{value > 0 ? `₹${fmt(value)}` : "—"}</span>
+  </div>
+);
+
+// ─── Init ──────────────────────────────────────────────────────────────────
 const INIT_DUTY = {
-  invoiceValue: "", exchangeRate: "",
-  freightValue: "", freightCurrency: "INR", freightPct: "",
-  insuranceValue: "", insuranceCurrency: "INR", insurancePct: "",
-  miscValue: "", miscCurrency: "INR",
-  bcdPct: "", swsPct: "", igstPct: "", addPct: "",
+  invoiceCurrency:"USD", invoiceValue:"", invoiceRate:"",
+  freightMode:"value",
+  freightCurrency:"INR", freightValue:"", freightRate:"", freightPct:"",
+  insMode:"value",
+  insCurrency:"INR", insValue:"", insRate:"", insPct:"",
+  miscCurrency:"INR", miscValue:"", miscRate:"",
+  bcdPct:"", swsPct:"", igstPct:"", addPct:"", aidcPct:"",
 };
 
 const INIT_LC = {
-  lcFreightValue: "", lcFreightCurrency: "INR",
-  localTransport: "", handlingCharges: "", customsClearance: "", portCharges: "",
-  additionalCharges: [],
+  freightCurrency:"INR", freightValue:"", freightRate:"",
+  cfcAai:"", customsClearance:"", transportation:"",
+  dgCharges:"", ccFee:"", deliveryOrder:"",
+  additionalCharges:[],
 };
 
-export default function Exim() {
+// ─── App ───────────────────────────────────────────────────────────────────
+export default function App() {
   const [tab, setTab] = useState("duty");
-  const [f, setF]     = useState(INIT_DUTY);
-  const [lc, setLc]   = useState(INIT_LC);
+  const [f,   setF]   = useState(INIT_DUTY);
+  const [lc,  setLc]  = useState(INIT_LC);
 
-  const setField   = useCallback((k, v) => setF(p  => ({ ...p, [k]: v })), []);
-  const setLcField = useCallback((k, v) => setLc(p => ({ ...p, [k]: v })), []);
+  const sf  = useCallback((k, v) => setF(p  => ({ ...p, [k]: v })), []);
+  const slc = useCallback((k, v) => setLc(p => ({ ...p, [k]: v })), []);
 
-  // When currency changes, auto-fill exchange rate if not manually set
-  const handleCurrencyChange = (currencyKey, valueKey, newCur) => {
-    setField(currencyKey, newCur);
-    if (newCur !== "INR" && !num(f.exchangeRate)) {
-      setField("exchangeRate", DEFAULT_RATES[newCur]?.toString() || "");
-    }
+  const pickCur = (curKey, rateKey, newCur) => {
+    sf(curKey, newCur);
+    sf(rateKey, "");
   };
 
-  // ── Duty calculations ──────────────────────────────────────────────────────
-  const exRate     = num(f.exchangeRate) || 1;
-  const invoiceINR = num(f.invoiceValue) * exRate;
+  // ── Rate resolution ────────────────────────────────────────────────────
+  const invoiceRateNum = num(f.invoiceRate);
+  const resolveRate = (cur, own) =>
+    cur === "INR" ? 1 : cur === f.invoiceCurrency ? invoiceRateNum : num(own);
 
-  const freightRaw       = num(f.freightValue) * (f.freightCurrency === "INR" ? 1 : exRate);
-  const freightCap       = invoiceINR * 0.2;
-  const freightCapped    = freightRaw > freightCap && invoiceINR > 0;
-  const freightINR       = freightCapped ? freightCap : freightRaw;
-  const freightPctActual = invoiceINR > 0 ? (freightINR / invoiceINR) * 100 : 0;
+  const freightRate = resolveRate(f.freightCurrency, f.freightRate);
+  const insRate     = resolveRate(f.insCurrency,     f.insRate);
+  const miscRate    = resolveRate(f.miscCurrency,    f.miscRate);
 
-  const insurancePctVal  = num(f.insurancePct);
-  const insuranceFlatRaw = num(f.insuranceValue) * (f.insuranceCurrency === "INR" ? 1 : exRate);
-  const insuranceINR     = insurancePctVal > 0
-    ? (invoiceINR + freightINR) * (insurancePctVal / 100)
-    : insuranceFlatRaw;
+  // ── Core maths ─────────────────────────────────────────────────────────
+  const invoiceINR = toINR(f.invoiceValue, f.invoiceCurrency, invoiceRateNum);
 
-  const miscINR          = num(f.miscValue) * (f.miscCurrency === "INR" ? 1 : exRate);
-  const assessableValue  = invoiceINR + freightINR + insuranceINR + miscINR;
+  const miscINR = toINR(f.miscValue, f.miscCurrency, miscRate);
 
-  const bcdPct    = num(f.bcdPct);
-  const bcdValue  = assessableValue * (bcdPct / 100);
-  const swsPct    = num(f.swsPct);
-  const swsValue  = bcdValue * (swsPct / 100);
-  const igstBase  = assessableValue + bcdValue + swsValue;
-  const igstPct   = num(f.igstPct);
-  const igstValue = igstBase * (igstPct / 100);
-  const addPct    = num(f.addPct);
-  const addValue  = assessableValue * (addPct / 100);
+  // Freight
+  const freightRawINR = f.freightMode === "pct"
+    ? invoiceINR * (num(f.freightPct) / 100)
+    : toINR(f.freightValue, f.freightCurrency, freightRate);
+  const freightCap    = invoiceINR * 0.2;
+  const freightCapped = freightRawINR > freightCap && invoiceINR > 0;
+  const freightINR    = freightCapped ? freightCap : freightRawINR;
+  const freightPctAct = invoiceINR > 0 ? (freightINR / invoiceINR) * 100 : 0;
 
-  const dutyExGst        = bcdValue + swsValue + addValue;
-  const totalDuty        = dutyExGst + igstValue;
-  const effectiveDutyPct = assessableValue > 0 ? (totalDuty / assessableValue) * 100 : 0;
+  // Insurance base = Invoice + Misc
+  const insBase = invoiceINR + miscINR;
+  const insINR  = f.insMode === "pct"
+    ? insBase * (num(f.insPct) / 100)
+    : toINR(f.insValue, f.insCurrency, insRate);
 
-  // ── Landed cost ────────────────────────────────────────────────────────────
-  const lcInvoiceINR   = invoiceINR;
-  const lcInsuranceINR = insuranceINR;
-  const lcDutyExGst    = dutyExGst;
-  const lcMiscINR      = miscINR;
+  const av = invoiceINR + freightINR + insINR + miscINR;
 
-  const lcFreightINR     = num(lc.lcFreightValue) * (lc.lcFreightCurrency === "INR" ? 1 : exRate);
-  const lcLocalTransport = num(lc.localTransport);
-  const lcHandling       = num(lc.handlingCharges);
-  const lcCustClearance  = num(lc.customsClearance);
-  const lcPort           = num(lc.portCharges);
-  const lcAddOther       = lc.additionalCharges.reduce((s, c) => s + num(c.amount), 0);
+  // Duties
+  const bcdPct  = num(f.bcdPct),  bcdVal  = av * (bcdPct / 100);
+  const swsPct  = num(f.swsPct),  swsVal  = bcdVal * (swsPct / 100);
+  const addPct  = num(f.addPct),  addVal  = av * (addPct / 100);
+  const aidcPct = num(f.aidcPct), aidcVal = av * (aidcPct / 100);
+  const igstPct = num(f.igstPct), igstBase = av + bcdVal + swsVal + addVal + aidcVal;
+  const igstVal = igstBase * (igstPct / 100);
 
-  // Landed = Invoice + Freight + Insurance + Misc + Duties(excl.IGST) + local charges
-  const lcTotal = lcInvoiceINR + lcFreightINR + lcInsuranceINR + lcMiscINR
-                + lcDutyExGst + lcLocalTransport + lcHandling + lcCustClearance + lcPort + lcAddOther;
+  const dutyExGst = bcdVal + swsVal + addVal + aidcVal;
+  const totalDuty = dutyExGst + igstVal;
+  const effPct    = av > 0 ? (totalDuty / av) * 100 : 0;
 
-  const addAdditional    = () => setLc(p => ({ ...p, additionalCharges: [...p.additionalCharges, { id: Date.now(), label: "", amount: "" }] }));
-  const updateAdditional = (id, k, v) => setLc(p => ({ ...p, additionalCharges: p.additionalCharges.map(c => c.id === id ? { ...c, [k]: v } : c) }));
-  const removeAdditional = (id) => setLc(p => ({ ...p, additionalCharges: p.additionalCharges.filter(c => c.id !== id) }));
+  // ── Landed maths ───────────────────────────────────────────────────────
+  const lcFreightRate = lc.freightCurrency === "INR"             ? 1
+                      : lc.freightCurrency === f.invoiceCurrency ? invoiceRateNum
+                      : num(lc.freightRate);
+  const lcFreight       = toINR(lc.freightValue, lc.freightCurrency, lcFreightRate);
+  const lcCfcAai        = num(lc.cfcAai);
+  const lcCustClearance = num(lc.customsClearance);
+  const lcTransport     = num(lc.transportation);
+  const lcDG            = num(lc.dgCharges);
+  const lcCCFee         = num(lc.ccFee);
+  const lcDeliveryOrder = num(lc.deliveryOrder);
+  const lcExtra         = lc.additionalCharges.reduce((s, c) => s + num(c.amount), 0);
+
+  const lcAutoBase      = invoiceINR + insINR + miscINR + dutyExGst;
+  const lcLocalSubtotal = lcFreight + lcCfcAai + lcCustClearance + lcTransport + lcDG + lcCCFee + lcDeliveryOrder + lcExtra;
+  const lcTotal         = lcAutoBase + lcLocalSubtotal;
+
+  const addExtra = () => setLc(p => ({ ...p, additionalCharges: [...p.additionalCharges, { id:Date.now(), label:"", amount:"" }] }));
+  const updExtra = (id,k,v) => setLc(p => ({ ...p, additionalCharges: p.additionalCharges.map(c => c.id===id?{...c,[k]:v}:c) }));
+  const delExtra = (id) => setLc(p => ({ ...p, additionalCharges: p.additionalCharges.filter(c => c.id!==id) }));
+
+  const multiCurrency = [...new Set([f.freightCurrency, f.insCurrency, f.miscCurrency].filter(c => c !== "INR" && c !== f.invoiceCurrency))].length > 0;
+
+  // Duty label builder
+  const dutyLabel = ["BCD","SWS", addVal>0?"ADD":"", aidcVal>0?"AIDC":""].filter(Boolean).join("+");
 
   return (
     <>
       <style>{STYLES}</style>
       <div className="app">
 
+        {/* Header */}
         <div className="header">
           <div className="header-icon">🛃</div>
           <div>
             <h1>India Customs Duty Calculator</h1>
-            <p>CIF-based assessable value · BCD · SWS · IGST · ADD · Landed Cost</p>
+            <p>CIF-based · BCD · SWS · IGST · ADD · AIDC · Landed Cost · Per-field exchange rates</p>
           </div>
         </div>
 
+        {/* Tabs */}
         <div className="tabs">
-          <button className={`tab ${tab === "duty" ? "active" : ""}`} onClick={() => setTab("duty")}>Duty Calculator</button>
-          <button className={`tab ${tab === "landed" ? "active" : ""}`} onClick={() => setTab("landed")}>Landed Cost</button>
+          <button className={`tab ${tab==="duty"?"active":""}`}   onClick={() => setTab("duty")}>Duty Calculator</button>
+          <button className={`tab ${tab==="landed"?"active":""}`} onClick={() => setTab("landed")}>Landed Cost</button>
         </div>
 
-        {/* ══════════════════════════ DUTY TAB ══════════════════════════════ */}
-        {tab === "duty" && (
-          <>
-            {/* Invoice */}
-            <div className="card">
-              <div className="section-header">
-                <div className="card-title">Invoice Details</div>
-                <button className="btn-reset" onClick={() => setF(INIT_DUTY)}>Reset</button>
+        {/* ══════════════ DUTY TAB ══════════════ */}
+        {tab === "duty" && <>
+
+          {multiCurrency && (
+            <div className="info-box">
+              <div className="info-box-title">💡 Multiple currencies detected</div>
+              <p>
+                Fields in the <strong>same currency as invoice ({f.invoiceCurrency})</strong> automatically inherit the invoice exchange rate.
+                Fields in a <strong>different currency</strong> show their own rate row — enter the specific rate for that charge.
+                All values are converted to INR individually before computing the assessable value.
+              </p>
+            </div>
+          )}
+
+          {/* Invoice */}
+          <div className="card">
+            <div className="section-header">
+              <div className="card-title">Invoice Details</div>
+              <button className="btn-reset" onClick={() => setF(INIT_DUTY)}>Reset</button>
+            </div>
+            <div className="grid-2">
+              <div className="field">
+                <label>Invoice Value</label>
+                <CxField
+                  currency={f.invoiceCurrency} value={f.invoiceValue}
+                  onCurrencyChange={e => pickCur("invoiceCurrency","invoiceRate",e.target.value)}
+                  onValueChange={e => sf("invoiceValue",e.target.value)}
+                />
+                <PerFieldRate
+                  currency={f.invoiceCurrency} invoiceCur={f.invoiceCurrency}
+                  invoiceRateStr={f.invoiceRate} rate={f.invoiceRate}
+                  onRateChange={e => sf("invoiceRate",e.target.value)}
+                  fieldValue={f.invoiceValue} isSource
+                />
               </div>
+              <div style={{ display:"flex", flexDirection:"column", justifyContent:"center" }}>
+                {invoiceINR > 0
+                  ? <div style={{ background:"var(--surface-2)", border:"1px solid var(--border)", borderRadius:9, padding:"14px 16px" }}>
+                      <div style={{ fontSize:10, color:"var(--text-3)", textTransform:"uppercase", letterSpacing:1, marginBottom:6, fontWeight:700 }}>Invoice in INR</div>
+                      <div style={{ fontSize:22, fontWeight:800, color:"var(--lime)" }}>₹{fmt(invoiceINR)}</div>
+                    </div>
+                  : <div style={{ fontSize:12, color:"var(--text-3)", fontStyle:"italic", padding:"8px 0" }}>
+                      Enter invoice value and exchange rate to see INR equivalent.
+                    </div>
+                }
+              </div>
+            </div>
+          </div>
+
+          {/* Freight / Insurance / Misc */}
+          <div className="card">
+            <div className="card-title">Freight, Insurance & Misc Charges</div>
+
+            {/* Freight */}
+            <div style={{ marginBottom:22 }}>
+              <div className="field-head">
+                <span className="field-head-label">
+                  Freight
+                  {freightCapped && <span style={{ marginLeft:8, fontSize:9, background:"rgba(247,223,30,.15)", border:"1px solid rgba(247,223,30,.3)", color:"var(--yellow)", padding:"2px 8px", borderRadius:20, fontWeight:800, textTransform:"uppercase" }}>Capped 20%</span>}
+                </span>
+                <VPToggle mode={f.freightMode} onChange={v => sf("freightMode",v)} />
+              </div>
+              {f.freightMode === "value" ? (
+                <>
+                  <CxField currency={f.freightCurrency} value={f.freightValue}
+                    onCurrencyChange={e => pickCur("freightCurrency","freightRate",e.target.value)}
+                    onValueChange={e => sf("freightValue",e.target.value)} />
+                  <PerFieldRate currency={f.freightCurrency} invoiceCur={f.invoiceCurrency}
+                    invoiceRateStr={f.invoiceRate} rate={f.freightRate}
+                    onRateChange={e => sf("freightRate",e.target.value)} fieldValue={f.freightValue} />
+                </>
+              ) : (
+                <>
+                  <PctField value={f.freightPct} onChange={e => sf("freightPct",e.target.value)} placeholder="e.g. 10" />
+                  {invoiceINR > 0 && num(f.freightPct) > 0 &&
+                    <div className="hint">{f.freightPct}% of invoice = ₹{fmt(invoiceINR * num(f.freightPct) / 100)}</div>}
+                </>
+              )}
+              {freightCapped && (
+                <div className="warning">
+                  <span>⚠</span>
+                  <span>Freight (₹{fmt(freightRawINR)}) exceeds 20% of invoice — capped at <strong>₹{fmt(freightCap)}</strong> for AV.</span>
+                </div>
+              )}
+              {!freightCapped && invoiceINR > 0 && freightINR > 0 &&
+                <div className="hint">= ₹{fmt(freightINR)} ({fmt(freightPctAct)}% of invoice)</div>}
+            </div>
+
+            {/* Insurance */}
+            <div style={{ marginBottom:22 }}>
+              <div className="field-head">
+                <span className="field-head-label">Insurance</span>
+                <VPToggle mode={f.insMode} onChange={v => { sf("insMode",v); sf("insValue",""); sf("insPct",""); }} />
+              </div>
+              {f.insMode === "value" ? (
+                <>
+                  <CxField currency={f.insCurrency} value={f.insValue}
+                    onCurrencyChange={e => { pickCur("insCurrency","insRate",e.target.value); sf("insPct",""); }}
+                    onValueChange={e => { sf("insValue",e.target.value); sf("insPct",""); }} />
+                  <PerFieldRate currency={f.insCurrency} invoiceCur={f.invoiceCurrency}
+                    invoiceRateStr={f.invoiceRate} rate={f.insRate}
+                    onRateChange={e => sf("insRate",e.target.value)} fieldValue={f.insValue} />
+                </>
+              ) : (
+                <>
+                  <PctField value={f.insPct} onChange={e => sf("insPct",e.target.value)} placeholder="e.g. 1.125" />
+                  {insBase > 0 && num(f.insPct) > 0 &&
+                    <div className="hint">{f.insPct}% of (Invoice{miscINR>0?" + Misc":""}) = ₹{fmt(insINR)}</div>}
+                </>
+              )}
+            </div>
+
+            {/* Misc */}
+            <div>
+              <div className="field-head">
+                <span className="field-head-label">Miscellaneous / EX Works</span>
+              </div>
+              <CxField currency={f.miscCurrency} value={f.miscValue}
+                onCurrencyChange={e => pickCur("miscCurrency","miscRate",e.target.value)}
+                onValueChange={e => sf("miscValue",e.target.value)} />
+              <PerFieldRate currency={f.miscCurrency} invoiceCur={f.invoiceCurrency}
+                invoiceRateStr={f.invoiceRate} rate={f.miscRate}
+                onRateChange={e => sf("miscRate",e.target.value)} fieldValue={f.miscValue} />
+            </div>
+          </div>
+
+          {/* Duty Rates */}
+          <div className="card">
+            <div className="card-title">Duty Rates</div>
+            <div className="grid-2">
+              <div className="field">
+                <label>BCD %</label>
+                <PctField value={f.bcdPct} onChange={e => sf("bcdPct",e.target.value)} placeholder="e.g. 10" />
+              </div>
+              <div className="field">
+                <label>SWS % <span style={{ color:"var(--text-3)", fontWeight:400, textTransform:"none", fontSize:10 }}>(on BCD)</span></label>
+                <PctField value={f.swsPct} onChange={e => sf("swsPct",e.target.value)} placeholder="e.g. 10" />
+              </div>
+              <div className="field">
+                <label>ADD % <span style={{ color:"var(--text-3)", fontWeight:400, textTransform:"none", fontSize:10 }}>(Anti-Dumping, on AV)</span></label>
+                <PctField value={f.addPct} onChange={e => sf("addPct",e.target.value)} placeholder="e.g. 5" />
+              </div>
+              <div className="field">
+                <label>AIDC % <span style={{ color:"var(--text-3)", fontWeight:400, textTransform:"none", fontSize:10 }}>(Agriculture Infra, on AV)</span></label>
+                <PctField value={f.aidcPct} onChange={e => sf("aidcPct",e.target.value)} placeholder="e.g. 5" />
+              </div>
+              <div className="field">
+                <label>IGST % <span style={{ color:"var(--text-3)", fontWeight:400, textTransform:"none", fontSize:10 }}>(on AV+BCD+SWS+ADD+AIDC)</span></label>
+                <PctField value={f.igstPct} onChange={e => sf("igstPct",e.target.value)} placeholder="e.g. 18" />
+              </div>
+            </div>
+          </div>
+
+          {/* Computation Breakup */}
+          <div className="card">
+            <div className="card-title">Computation Breakup</div>
+            <div className="tape" />
+
+            <div className="block-label">Assessable Value (CIF)</div>
+            <div className="sub-result">
+              <RR label="Invoice Value" value={invoiceINR} />
+              <RR label={`Freight${freightCapped?" (capped at 20%)":""}`} value={freightINR} />
+              <RR label="Insurance" value={insINR} />
+              <RR label="Misc / EX Works" value={miscINR} />
+              <RR label="Assessable Value" value={av} cls="rv-lime" bold sep />
+            </div>
+
+            <div className="block-label">Customs Duty (excl. IGST)</div>
+            <div className="sub-result">
+              <RR label={`BCD @ ${bcdPct}% on AV`} value={bcdVal} cls="rv-lime" />
+              <RR label={`SWS @ ${swsPct}% on BCD`} value={swsVal} cls="rv-lime" />
+              {addVal  > 0 && <RR label={`ADD @ ${addPct}% on AV`}  value={addVal}  cls="rv-lav" />}
+              {aidcVal > 0 && <RR label={`AIDC @ ${aidcPct}% on AV`} value={aidcVal} cls="rv-lav" />}
+              <RR label="Total Duty excl. IGST" value={dutyExGst} cls="rv-lime" bold sep />
+            </div>
+
+            <div className="block-label">IGST</div>
+            <div className="sub-result">
+              <RR label={`IGST Base (AV + BCD + SWS${addVal>0?" + ADD":""}${aidcVal>0?" + AIDC":""})`} value={igstBase} cls="rv-dim" />
+              <RR label={`IGST @ ${igstPct}%`} value={igstVal} cls="rv-green" />
+            </div>
+
+            <div className="summary-block">
+              <RR label={`Duty excl. IGST (${dutyLabel})`} value={dutyExGst} cls="rv-lime" />
+              <RR label="IGST" value={igstVal} cls="rv-green" />
+              <RR label="Total Duty Payable" value={totalDuty} cls="rv-lime rv-big" bold sep />
+              <div className="result-row">
+                <span className="result-label">Effective Duty Rate on AV</span>
+                <span className="result-value rv-dim">{fmt(effPct)}%</span>
+              </div>
+            </div>
+
+            <div className="total-card">
+              <div>
+                <div className="total-label">Total Duty Payable</div>
+                <div className="total-sub">{dutyLabel} + IGST</div>
+              </div>
+              <div className="total-value">₹{fmt(totalDuty)}</div>
+            </div>
+          </div>
+        </>}
+
+        {/* ══════════════ LANDED COST TAB ══════════════ */}
+        {tab === "landed" && <>
+          <div className="card">
+            <div className="section-header">
+              <div className="card-title">Landed Cost Inputs</div>
+              <button className="btn-reset" onClick={() => setLc(INIT_LC)}>Reset</button>
+            </div>
+
+            {/* Auto-filled */}
+            <div className="auto-group">
+              <div className="auto-group-title">Auto-filled from Duty Calculator</div>
               <div className="grid-2">
-                <div className="field">
-                  <label>Invoice Value</label>
-                  <CxField
-                    currency={f.freightCurrency === "INR" ? "INR" : f.freightCurrency}
-                    value={f.invoiceValue}
-                    exRate={f.exchangeRate}
-                    onCurrencyChange={() => {}}
-                    onValueChange={e => setField("invoiceValue", e.target.value)}
-                    placeholder="0.00"
-                  />
-                  {/* Standalone currency selector for invoice */}
-                  <div style={{ display: "none" }} />
-                </div>
-                <div className="field">
-                  <label>Exchange Rate (1 Unit → INR)</label>
-                  <input className="input" type="number" placeholder="e.g. 83.50"
-                    value={f.exchangeRate} onChange={e => setField("exchangeRate", e.target.value)} />
-                </div>
+                <ReadonlyField label="Invoice Value (INR)" value={invoiceINR} />
+                <ReadonlyField label="Insurance (INR)" value={insINR} />
+                <ReadonlyField label={`Duties excl. IGST (${dutyLabel})`} value={dutyExGst} color="var(--lime)" />
+                <ReadonlyField label="Misc / EX Works (INR)" value={miscINR} />
               </div>
-              {invoiceINR > 0 && (
-                <div style={{ marginTop: 10, fontSize: 13, color: "var(--text-2)" }}>
-                  Invoice in INR: <strong style={{ color: "var(--green-l)" }}>₹{fmt(invoiceINR)}</strong>
+              {av === 0 && (
+                <div className="warning" style={{ marginTop:14 }}>
+                  <span>ℹ</span>
+                  <span>Fill in the <strong>Duty Calculator</strong> tab first — values auto-populate here.</span>
                 </div>
               )}
             </div>
 
-            {/* Freight / Insurance / Misc */}
-            <div className="card">
-              <div className="card-title">Freight, Insurance & Misc Charges</div>
+            <div className="divider" />
 
-              {/* Freight */}
-              <div className="field" style={{ marginBottom: 16 }}>
-                <label>
-                  Freight
-                  {freightCapped && <span className="auto-badge" style={{ background: "rgba(239,68,68,.12)", borderColor: "rgba(239,68,68,.3)", color: "var(--red-l)" }}>CAPPED 20%</span>}
-                </label>
-                <div className="pct-row">
-                  <CxField
-                    currency={f.freightCurrency}
-                    value={f.freightValue}
-                    exRate={f.exchangeRate}
-                    onCurrencyChange={e => handleCurrencyChange("freightCurrency", "freightValue", e.target.value)}
-                    onValueChange={e => setField("freightValue", e.target.value)}
-                  />
-                  <div className="pct-box">
-                    <span>Add %</span>
-                    <input className="pct-input" type="number" placeholder="%" value={f.freightPct}
-                      onChange={e => setField("freightPct", e.target.value)} />
-                  </div>
-                </div>
-                {freightCapped && (
-                  <div className="warning">
-                    <span>⚠</span>
-                    <span>Freight (₹{fmt(freightRaw)}) exceeds 20% of invoice — capped at <strong>₹{fmt(freightCap)}</strong> for AV.</span>
-                  </div>
-                )}
-                {invoiceINR > 0 && freightINR > 0 && (
-                  <div className="cx-converted">Freight in AV: ₹{fmt(freightINR)} ({fmt(freightPctActual)}% of invoice)</div>
-                )}
-              </div>
-
-              {/* Insurance */}
-              <div className="field" style={{ marginBottom: 16 }}>
-                <label>Insurance</label>
-                <div className="pct-row">
-                  <CxField
-                    currency={f.insuranceCurrency}
-                    value={f.insuranceValue}
-                    exRate={f.exchangeRate}
-                    onCurrencyChange={e => { handleCurrencyChange("insuranceCurrency", "insuranceValue", e.target.value); setField("insurancePct", ""); }}
-                    onValueChange={e => { setField("insuranceValue", e.target.value); setField("insurancePct", ""); }}
-                    placeholder="Flat amount"
-                  />
-                  <div className="pct-box">
-                    <span>OR %</span>
-                    <input className="pct-input" type="number" placeholder="%" value={f.insurancePct}
-                      onChange={e => { setField("insurancePct", e.target.value); setField("insuranceValue", ""); }} />
-                  </div>
-                </div>
-                {insurancePctVal > 0 && (
-                  <div className="cx-converted">= {insurancePctVal}% of (Invoice + Freight) = ₹{fmt(insuranceINR)}</div>
-                )}
-              </div>
-
-              {/* Misc */}
-              <div className="field">
-                <label>Miscellaneous / EX Works Charges</label>
-                <CxField
-                  currency={f.miscCurrency}
-                  value={f.miscValue}
-                  exRate={f.exchangeRate}
-                  onCurrencyChange={e => handleCurrencyChange("miscCurrency", "miscValue", e.target.value)}
-                  onValueChange={e => setField("miscValue", e.target.value)}
-                />
-              </div>
+            {/* Freight */}
+            <div style={{ marginBottom:20 }}>
+              <div className="group-label">Freight</div>
+              <CxField currency={lc.freightCurrency} value={lc.freightValue}
+                onCurrencyChange={e => { slc("freightCurrency",e.target.value); slc("freightRate",""); }}
+                onValueChange={e => slc("freightValue",e.target.value)} />
+              <PerFieldRate currency={lc.freightCurrency} invoiceCur={f.invoiceCurrency}
+                invoiceRateStr={f.invoiceRate} rate={lc.freightRate}
+                onRateChange={e => slc("freightRate",e.target.value)} fieldValue={lc.freightValue} />
             </div>
 
-            {/* Duty Rates */}
-            <div className="card">
-              <div className="card-title">Duty Rates</div>
-              <div className="grid-2">
-                <div className="field">
-                  <label>Basic Customs Duty (BCD) %</label>
-                  <input className="input" type="number" placeholder="e.g. 10"
-                    value={f.bcdPct} onChange={e => setField("bcdPct", e.target.value)} />
+            <div className="divider" />
+
+            {/* Fixed local charges */}
+            <div className="group-label">Local Charges</div>
+            <div className="grid-2" style={{ marginBottom:14 }}>
+              {[
+                ["CFS / AAI Charges (INR)",       "cfcAai"],
+                ["Customs Clearance Charges (INR)","customsClearance"],
+                ["Transportation Charges (INR)",   "transportation"],
+                ["DG Charges (INR)",               "dgCharges"],
+                ["CC Fee (INR)",                   "ccFee"],
+                ["Delivery Order Charges (INR)",   "deliveryOrder"],
+              ].map(([lbl, key]) => (
+                <div className="field" key={key}>
+                  <label>{lbl}</label>
+                  <input className="input" type="number" placeholder="0.00"
+                    value={lc[key]} onChange={e => slc(key, e.target.value)} />
                 </div>
-                <div className="field">
-                  <label>Social Welfare Surcharge (SWS) %</label>
-                  <input className="input" type="number" placeholder="e.g. 10 (on BCD)"
-                    value={f.swsPct} onChange={e => setField("swsPct", e.target.value)} />
-                </div>
-                <div className="field">
-                  <label>IGST %</label>
-                  <input className="input" type="number" placeholder="e.g. 18"
-                    value={f.igstPct} onChange={e => setField("igstPct", e.target.value)} />
-                </div>
-                <div className="field">
-                  <label>Anti-Dumping Duty (ADD) %</label>
-                  <input className="input" type="number" placeholder="e.g. 5"
-                    value={f.addPct} onChange={e => setField("addPct", e.target.value)} />
-                </div>
-              </div>
+              ))}
             </div>
 
-            {/* Results */}
-            <div className="card">
-              <div className="card-title">Computation Breakup</div>
-              <div className="tape" />
-
-              {/* Assessable Value */}
-              <div className="block-label">Assessable Value (CIF)</div>
-              <div className="sub-result">
-                <div className="result-row">
-                  <span className="result-label">Invoice Value (INR)</span>
-                  <span className="result-value">₹{fmt(invoiceINR)}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Freight{freightCapped ? " (capped at 20%)" : ""}</span>
-                  <span className="result-value">₹{fmt(freightINR)}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Insurance</span>
-                  <span className="result-value">₹{fmt(insuranceINR)}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Misc / EX Works</span>
-                  <span className="result-value">₹{fmt(miscINR)}</span>
-                </div>
-                <div className="result-row" style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 4 }}>
-                  <span className="result-label" style={{ fontWeight: 600, color: "var(--text-1)" }}>Assessable Value</span>
-                  <span className="result-value gl">₹{fmt(assessableValue)}</span>
-                </div>
-              </div>
-
-              {/* Customs Duty excl. IGST */}
-              <div className="block-label">Customs Duty (excl. IGST)</div>
-              <div className="sub-result">
-                <div className="result-row">
-                  <span className="result-label">BCD @ {bcdPct}% on AV</span>
-                  <span className="result-value gl">₹{fmt(bcdValue)}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">SWS @ {swsPct}% on BCD</span>
-                  <span className="result-value gl">₹{fmt(swsValue)}</span>
-                </div>
-                {addValue > 0 && (
-                  <div className="result-row">
-                    <span className="result-label">ADD @ {addPct}% on AV</span>
-                    <span className="result-value pur">₹{fmt(addValue)}</span>
-                  </div>
-                )}
-                <div className="result-row" style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 4 }}>
-                  <span className="result-label" style={{ fontWeight: 600, color: "var(--text-1)" }}>
-                    Total Duty excl. IGST
-                  </span>
-                  <span className="result-value gl">₹{fmt(dutyExGst)}</span>
-                </div>
-              </div>
-
-              {/* IGST */}
-              <div className="block-label">IGST</div>
-              <div className="sub-result">
-                <div className="result-row">
-                  <span className="result-label">IGST Base (AV + BCD + SWS)</span>
-                  <span className="result-value dim">₹{fmt(igstBase)}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">IGST @ {igstPct}%</span>
-                  <span className="result-value teal">₹{fmt(igstValue)}</span>
-                </div>
-              </div>
-
-              {/* Summary */}
-              <div className="summary-block">
-                <div className="result-row">
-                  <span className="result-label">Duty excl. IGST (BCD + SWS{addValue > 0 ? " + ADD" : ""})</span>
-                  <span className="result-value gl">₹{fmt(dutyExGst)}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">IGST</span>
-                  <span className="result-value teal">₹{fmt(igstValue)}</span>
-                </div>
-                <div className="result-row" style={{ borderTop: "1px solid rgba(110,231,183,.2)", paddingTop: 10, marginTop: 4 }}>
-                  <span className="result-label" style={{ fontWeight: 700, color: "var(--text-1)" }}>Total Duty Payable</span>
-                  <span className="result-value gl" style={{ fontSize: 16 }}>₹{fmt(totalDuty)}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Effective Duty Rate on AV</span>
-                  <span className="result-value dim">{fmt(effectiveDutyPct)}%</span>
-                </div>
-              </div>
-
-              <div className="total-card">
-                <div>
-                  <div className="total-label">Total Duty Payable</div>
-                  <div className="total-sub">BCD + SWS{addValue > 0 ? " + ADD" : ""} + IGST</div>
-                </div>
-                <div className="total-value">₹{fmt(totalDuty)}</div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ═════════════════════════ LANDED COST TAB ════════════════════════ */}
-        {tab === "landed" && (
-          <>
-            <div className="card">
-              <div className="section-header">
-                <div className="card-title">Landed Cost Inputs</div>
-                <button className="btn-reset" onClick={() => setLc(INIT_LC)}>Reset</button>
-              </div>
-
-              {/* Auto-filled */}
-              <div className="auto-group">
-                <div className="auto-group-title">From Duty Calculator</div>
-                <div className="grid-2">
-                  <ReadonlyField label="Invoice Value (INR)" value={lcInvoiceINR} />
-                  <ReadonlyField label="Insurance (INR)" value={lcInsuranceINR} />
-                  <ReadonlyField label="Duties excl. IGST (BCD + SWS{addValue > 0 ? ' + ADD' : ''})" value={lcDutyExGst} color="var(--green-l)" />
-                  <ReadonlyField label="Misc / EX Works (INR)" value={lcMiscINR} />
-                </div>
-                {assessableValue === 0 && (
-                  <div className="warning" style={{ marginTop: 14 }}>
-                    <span>ℹ</span>
-                    <span>Fill in the <strong>Duty Calculator</strong> tab first — values will auto-populate here.</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="divider" />
-
-              {/* Freight — manual */}
-              <div className="field" style={{ marginBottom: 18 }}>
-                <label>Freight</label>
-                <CxField
-                  currency={lc.lcFreightCurrency}
-                  value={lc.lcFreightValue}
-                  exRate={f.exchangeRate}
-                  onCurrencyChange={e => setLcField("lcFreightCurrency", e.target.value)}
-                  onValueChange={e => setLcField("lcFreightValue", e.target.value)}
-                />
-              </div>
-
-              <div className="divider" />
-
-              {/* Local charges */}
-              <div style={{ marginBottom: 4 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--amber)", marginBottom: 14 }}>
-                  Local & Additional Charges
-                </div>
-                <div className="grid-2" style={{ marginBottom: 12 }}>
-                  <div className="field">
-                    <label>Local Transport (INR)</label>
-                    <input className="input" type="number" placeholder="0.00"
-                      value={lc.localTransport} onChange={e => setLcField("localTransport", e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>Handling Charges (INR)</label>
-                    <input className="input" type="number" placeholder="0.00"
-                      value={lc.handlingCharges} onChange={e => setLcField("handlingCharges", e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>Customs Clearance / CHA (INR)</label>
-                    <input className="input" type="number" placeholder="0.00"
-                      value={lc.customsClearance} onChange={e => setLcField("customsClearance", e.target.value)} />
-                  </div>
-                  <div className="field">
-                    <label>Port / Demurrage (INR)</label>
-                    <input className="input" type="number" placeholder="0.00"
-                      value={lc.portCharges} onChange={e => setLcField("portCharges", e.target.value)} />
-                  </div>
-                </div>
-
+            {/* Dynamic additional charges */}
+            {lc.additionalCharges.length > 0 && (
+              <div style={{ marginBottom:8 }}>
                 {lc.additionalCharges.map(c => (
                   <div key={c.id} className="lc-item">
                     <input className="input" type="text" placeholder="Description"
-                      value={c.label} onChange={e => updateAdditional(c.id, "label", e.target.value)} />
+                      value={c.label} onChange={e => updExtra(c.id,"label",e.target.value)} />
                     <input className="input" type="number" placeholder="Amount (INR)"
-                      value={c.amount} onChange={e => updateAdditional(c.id, "amount", e.target.value)} />
-                    <button className="lc-del" onClick={() => removeAdditional(c.id)}>✕</button>
-                  </div>
-                ))}
-                <button className="lc-add-btn" onClick={addAdditional}>+ Add charge</button>
-              </div>
-            </div>
-
-            {/* LC Results */}
-            <div className="card">
-              <div className="card-title">Landed Cost Breakup</div>
-              <div className="tape" />
-
-              {/* Import cost components */}
-              <div className="block-label">Import Cost Components</div>
-              <div className="sub-result">
-                <div className="result-row">
-                  <span className="result-label">Invoice Value</span>
-                  <span className="result-value">{lcInvoiceINR > 0 ? `₹${fmt(lcInvoiceINR)}` : "—"}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Freight</span>
-                  <span className="result-value">{lcFreightINR > 0 ? `₹${fmt(lcFreightINR)}` : "—"}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Insurance</span>
-                  <span className="result-value">{lcInsuranceINR > 0 ? `₹${fmt(lcInsuranceINR)}` : "—"}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Misc / EX Works</span>
-                  <span className="result-value">{lcMiscINR > 0 ? `₹${fmt(lcMiscINR)}` : "—"}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Duties excl. IGST</span>
-                  <span className="result-value gl">{lcDutyExGst > 0 ? `₹${fmt(lcDutyExGst)}` : "—"}</span>
-                </div>
-              </div>
-
-              {/* Local charges */}
-              <div className="block-label">Local Charges</div>
-              <div className="sub-result">
-                <div className="result-row">
-                  <span className="result-label">Local Transport</span>
-                  <span className="result-value">{lcLocalTransport > 0 ? `₹${fmt(lcLocalTransport)}` : "—"}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Handling Charges</span>
-                  <span className="result-value">{lcHandling > 0 ? `₹${fmt(lcHandling)}` : "—"}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Customs Clearance / CHA</span>
-                  <span className="result-value">{lcCustClearance > 0 ? `₹${fmt(lcCustClearance)}` : "—"}</span>
-                </div>
-                <div className="result-row">
-                  <span className="result-label">Port / Demurrage</span>
-                  <span className="result-value">{lcPort > 0 ? `₹${fmt(lcPort)}` : "—"}</span>
-                </div>
-                {lc.additionalCharges.map(c => (
-                  <div className="result-row" key={c.id}>
-                    <span className="result-label">{c.label || "Additional Charge"}</span>
-                    <span className="result-value">{num(c.amount) > 0 ? `₹${fmt(num(c.amount))}` : "—"}</span>
+                      value={c.amount} onChange={e => updExtra(c.id,"amount",e.target.value)} />
+                    <button className="lc-del" onClick={() => delExtra(c.id)}>✕</button>
                   </div>
                 ))}
               </div>
+            )}
+            <button className="lc-add-btn" onClick={addExtra}>+ Add additional charge</button>
+          </div>
 
-              {/* Total */}
-              <div className="total-card">
-                <div>
-                  <div className="total-label">Total Landed Cost</div>
-                  <div className="total-sub">Invoice + Freight + Insurance + Misc + Duties (excl. IGST) + Local Charges</div>
-                </div>
-                <div className="total-value">₹{fmt(lcTotal)}</div>
-              </div>
+          {/* LC Results */}
+          <div className="card">
+            <div className="card-title">Landed Cost Breakup</div>
+            <div className="tape" />
 
-              {/* Stat boxes */}
-              {lcTotal > 0 && lcInvoiceINR > 0 && (
-                <div className="stat-row">
-                  <div className="stat-box">
-                    <div className="stat-label">Invoice → Landed</div>
-                    <div className="stat-value" style={{ color: "var(--green-l)" }}>
-                      +{fmt(((lcTotal / lcInvoiceINR) - 1) * 100)}%
-                    </div>
-                  </div>
-                  <div className="stat-box">
-                    <div className="stat-label">Duty Component</div>
-                    <div className="stat-value" style={{ color: "var(--amber-l)" }}>
-                      {lcTotal > 0 ? fmt((lcDutyExGst / lcTotal) * 100) : "—"}%
-                    </div>
-                  </div>
-                  <div className="stat-box">
-                    <div className="stat-label">Add-ons over Invoice</div>
-                    <div className="stat-value" style={{ color: "var(--purple)" }}>
-                      ₹{fmt(lcTotal - lcInvoiceINR)}
-                    </div>
-                  </div>
-                </div>
-              )}
+            <div className="block-label">Import Cost (ex-India)</div>
+            <div className="sub-result">
+              <RR label="Invoice Value" value={invoiceINR} />
+              <RR label="Insurance" value={insINR} />
+              <RR label="Misc / EX Works" value={miscINR} />
+              <RR label={`Duties excl. IGST (${dutyLabel})`} value={dutyExGst} cls="rv-lime" />
+              <RR label="Import Sub-total" value={lcAutoBase} cls="rv-lime" bold sep />
             </div>
-          </>
-        )}
 
-        <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-3)", marginTop: 8 }}>
+            <div className="block-label">Freight & Local Charges (India)</div>
+            <div className="sub-result">
+              {lcFreight       > 0 && <RR label="Freight" value={lcFreight} />}
+              {lcCfcAai        > 0 && <RR label="CFS / AAI Charges" value={lcCfcAai} />}
+              {lcCustClearance > 0 && <RR label="Customs Clearance Charges" value={lcCustClearance} />}
+              {lcTransport     > 0 && <RR label="Transportation Charges" value={lcTransport} />}
+              {lcDG            > 0 && <RR label="DG Charges" value={lcDG} />}
+              {lcCCFee         > 0 && <RR label="CC Fee" value={lcCCFee} />}
+              {lcDeliveryOrder > 0 && <RR label="Delivery Order Charges" value={lcDeliveryOrder} />}
+              {lc.additionalCharges.map(c => num(c.amount)>0 && (
+                <RR key={c.id} label={c.label||"Additional Charge"} value={num(c.amount)} />
+              ))}
+              {lcLocalSubtotal === 0
+                ? <div className="result-row"><span className="result-label" style={{ color:"var(--text-3)", fontStyle:"italic" }}>No local charges entered</span><span /></div>
+                : <RR label="Local Charges Sub-total" value={lcLocalSubtotal} cls="rv-yel" bold sep />
+              }
+            </div>
+
+            <div className="summary-block">
+              <RR label="Import Sub-total" value={lcAutoBase} cls="rv-lime" />
+              <RR label="Local Charges" value={lcLocalSubtotal} cls="rv-yel" />
+              <RR label="Total Landed Cost" value={lcTotal} cls="rv-green rv-big" bold sep />
+            </div>
+
+            <div className="total-card-green">
+              <div>
+                <div className="total-label">Total Landed Cost</div>
+                <div className="total-sub">Invoice + Insurance + Misc + Duties excl. IGST + Freight + Local Charges</div>
+              </div>
+              <div className="total-value">₹{fmt(lcTotal)}</div>
+            </div>
+
+            {lcTotal > 0 && invoiceINR > 0 && (
+              <div className="stat-row">
+                <div className="stat-box">
+                  <div className="stat-label">Invoice → Landed</div>
+                  <div className="stat-value" style={{ color:"var(--lime)" }}>+{fmt(((lcTotal/invoiceINR)-1)*100)}%</div>
+                </div>
+                <div className="stat-box">
+                  <div className="stat-label">Duty Share</div>
+                  <div className="stat-value" style={{ color:"var(--lavender)" }}>{fmt((dutyExGst/lcTotal)*100)}%</div>
+                </div>
+                <div className="stat-box">
+                  <div className="stat-label">Local Charges</div>
+                  <div className="stat-value" style={{ color:"var(--yellow)" }}>₹{fmt(lcLocalSubtotal)}</div>
+                </div>
+                <div className="stat-box">
+                  <div className="stat-label">Add-ons over Invoice</div>
+                  <div className="stat-value" style={{ color:"var(--green)" }}>₹{fmt(lcTotal-invoiceINR)}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </>}
+
+        <div style={{ textAlign:"center", fontSize:11, color:"var(--text-3)", marginTop:12 }}>
           For guidance only · Verify with your CHA or customs broker · Rates subject to change
         </div>
       </div>
