@@ -516,10 +516,7 @@ export default function App() {
         {/* ── Header ── */}
         <div className="hdr">
           <div className="hdr-tag">Customs · Duty · Landed Cost</div>
-          <h1>India <em>Customs</em> Duty Calculator</h1>
-          <div className="hdr-sub">
-            CIF-based assessable value &nbsp;·&nbsp; BCD · SWS · ADD · AIDC · IGST &nbsp;·&nbsp; Per-field exchange rates &nbsp;·&nbsp; Landed cost
-          </div>
+          <h1><em>Customs</em> Duty Calculator</h1>
           <div className="hdr-line"/>
         </div>
 
@@ -950,10 +947,6 @@ export default function App() {
             )}
           </div>
         </>}
-
-        <div style={{textAlign:"center",fontSize:11,color:"var(--i3)",marginTop:16}}>
-          For guidance only · Verify with your CHA or customs broker · Rates subject to change
-        </div>
       </div>
     </>
   );
